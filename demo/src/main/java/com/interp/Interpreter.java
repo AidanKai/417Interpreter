@@ -1,7 +1,12 @@
 package com.interp;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Scanner;
+import java.util.function.Function;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -15,42 +20,89 @@ import com.google.gson.JsonPrimitive;
  */
 public class Interpreter
 {
+    boolean lexicalScope;
     /**
      * Main class, loops through a switch statement and exits with non zero exit status on errors.
      * @param args
      */
     public static void main( String[] args ) {
-        System.out.println( "Hello World!" );
-
         // Create initial environment
-        HashMap<String, Value> initialBindings = new HashMap();
-        Environment initialEnv = new Environment(initialBindings);
+        HashMap<String, Value> initialBindings = new HashMap<>();
 
-        // BINDINGS FOR INIT ONCE I FIGURE THIS OUT
-       /*  initialBindings.put("add", );
-        initialBindings.put("sub", );
-        initialBindings.put("mul", );
-        initialBindings.put("true", );
-        initialBindings.put("false", );
-        initialBindings.put("x", );
-        initialBindings.put("v", );
-        initialBindings.put("i", ); */
-
-        while (true) { 
-            try (Scanner scan = new Scanner(System.in)) {
-                String input = scan.nextLine();
-                
-                // Parse the JSON string into a JsonObject
-                JsonObject inputProgram = JsonParser.parseString(input).getAsJsonObject();
-                
-                // Extract the program array
-                JsonArray programArray = inputProgram.getAsJsonArray();
-                
-                // Iterate through each element of json array
-                for (JsonElement element : programArray) {
-                    eval(element, initialEnv);
-                }
+        // Value creation for built-in functions
+        Value addValue = new Value("built-in add procedure +", argsList -> {
+            if (argsList.size() != 2 || 
+                !(argsList.get(0) instanceof Long) ||
+                !(argsList.get(1) instanceof Long)) {
+                System.out.println("Add function requires exactly two signed integers.");
+                System.exit(1);
             }
+
+            Long a = (Long) argsList.get(0);
+            Long b = (Long) argsList.get(1);
+            return a + b;
+        });
+
+        Value subValue = new Value("built-in subtract procedure -", argsList -> {
+            if (argsList.size() != 2 || 
+                !(argsList.get(0) instanceof Long) ||
+                !(argsList.get(1) instanceof Long)) {
+                System.out.println("Sub function requires exactly two signed integers.");
+                System.exit(1);
+            }
+
+            Long a = (Long) argsList.get(0);
+            Long b = (Long) argsList.get(1);
+            return a - b;
+        });
+
+        Value mulValue = new Value("built-in multiply procedure *", argsList -> {
+            if (argsList.isEmpty() || argsList.stream().anyMatch(arg -> !(arg instanceof Long))) {
+                throw new IllegalArgumentException("Function requires all arguments to be integers.");
+            }
+
+            return argsList.stream().mapToLong(arg -> (Long) arg).reduce(1, (a, b) -> a * b);
+        });
+
+        Value eqValue = new Value("built-in equals procedure =", argsList -> {
+            if (argsList.size() != 2 || 
+                !(argsList.get(0) instanceof Long) ||
+                !(argsList.get(1) instanceof Long)) {
+                System.out.println("Eq function requires exactly two signed integers.");
+                System.exit(1);
+            }
+
+            Long a = (Long) argsList.get(0);
+            Long b = (Long) argsList.get(1);
+            return Objects.equals(a, b);
+        });
+
+        //Value zero = new Value("built-in zero? procedure", )
+
+        initialBindings.put("add", addValue);
+        initialBindings.put("sub", subValue);
+        initialBindings.put("mul", mulValue);
+        initialBindings.put("eq", eqValue);
+        initialBindings.put("true", new Value(true));
+        initialBindings.put("false", new Value(false));
+        Long x = (long) 10;
+        Long v = (long) 5;
+        Long i = (long) 1;
+        initialBindings.put("x", new Value(x));
+        initialBindings.put("v", new Value(v));
+        initialBindings.put("i", new Value(i));
+
+        
+        Environment initialEnv = new Environment(initialBindings);
+        
+        try (Scanner scan = new Scanner(System.in)) {
+            String input = scan.nextLine();
+                
+            // Parse the JSON string into a JsonObject
+            JsonElement inputProgram = JsonParser.parseString(input);
+                
+            // Extract the program array
+            System.out.println(eval(inputProgram, initialEnv).getData());
         }
 
     }
@@ -82,28 +134,179 @@ public class Interpreter
                 result.setData(prim.getAsString());
             }
         }
-        
+        // SPECIAL FORM (keyword) or functionality
+        else if (exp.isJsonObject()) {
+            JsonObject expObj = exp.getAsJsonObject();
 
+            for (Map.Entry<String, JsonElement> entry : expObj.entrySet()) {
+                String key = entry.getKey();
+                JsonElement value = entry.getValue();
+
+                if (value.isJsonArray()) {
+                    JsonArray specialFormArray = value.getAsJsonArray();
+                    switch (key) {
+                        case "Application":
+                            JsonElement fn = specialFormArray.remove(0);
+                            List<Value> args = new ArrayList<>();
+                            for (JsonElement arg : specialFormArray) {
+                                args.add(eval(arg, env));
+                            }
+                            return applyFunction(fn, args, env);
+                        case "Lambda":
+                            return makeFunction(specialFormArray.get(0), specialFormArray.get(1), env);
+                        case "Block":
+                            return executeBlock(specialFormArray, env);
+                        case "Cond":
+                            //return applyConditional()
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                else {
+                    switch (key) {
+                        case "Identifier":
+                            //System.out.println("Value returned from lookup " + key + ": " + lookup(value.getAsString(), env).getData());
+                            return lookup(value.getAsString(), env);
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+        // Error for invalid exp
+        else {
+            System.out.println("417: unknown expression type");
+            System.exit(1);
+        }
+        
         return result;
     }
 
     /**
-     * Helper method for introducing new bindings to an environment
-     * @param id
-     * @param val
+     * 
+     * @param clauses to be evaluated
      * @param env
+     * @return Value with either true or false as data
      */
-    private static void bind(String id, Value val, Environment env) {
-        env.bindings.put(id, val);
+    private static Value applyConditional(JsonElement clauses, Environment env) {
+        JsonArray clauseArray = clauses.getAsJsonArray();
+
+        if (clauseArray.isEmpty()) {
+            return new Value(false);
+        }
+
+
+        return new Value();
     }
 
+    /**
+     * 
+     * @return
+     */
+    private static Value executeBlock(JsonArray exps, Environment env) {
+        // return false if empty
+        if (exps.isEmpty()) {
+            return new Value(false);
+        }
+
+        if (exps.size() == 1) {
+            return eval(exps.get(0), env);
+        }
+        else {
+            eval(exps.remove(0), env);
+            return executeBlock(exps, env);
+        }
+    }
+
+    /**
+     * 
+     * @param id identifier for expression
+     * @param env
+     * @return index of searched key
+     */
+    private static Value lookup(String id, Environment env) {
+        /* System.out.println("\nKey being looked up: " + id);
+        System.out.println("Size of env: " + env.bindings.size());
+        System.out.println("Keys in bindings:");
+         */
+        /* for (String key : env.bindings.keySet()) {
+            System.out.print(key + ", ");
+        } */
+        Value result = env.bindings.get(id);
+        if (result == null) {
+            System.out.println("Error 417: Identifier not found.");
+            System.exit(1);
+        }
+        return result;
+    }
+
+    /**
+     * Function for making a user-defined function given
+     * @return
+     */
+    private static Value makeFunction(JsonElement args, JsonElement block, Environment env) {
+        return new UserDefinedFunction(args, block, env);
+    }
+
+    /**
+     * 
+     * @param fn
+     * @param args
+     * @param env
+     * @return
+     */
+    private static Value applyFunction(JsonElement fn, List<Value> args, Environment env) {
+
+        Value operator = eval(fn, env);
+
+        // Check that operator is actually a function
+        if (!operator.isFunction()) {
+            System.out.println("Error 417: Not an applicable function.");
+            System.exit(1);
+        }
+
+        // Check if operator is a built in function
+        if (operator.getData() instanceof String) {
+            // Evaluate args for function
+            List<Object> operands = new ArrayList<>();
+
+            for (Value exp : args) {
+                operands.add(exp.getData());
+            }
+
+            return new Value(operator.invoke(operands));
+        }
+        else {
+            UserDefinedFunction userOperator = (UserDefinedFunction) operator;
+            //JsonArray userFnParams = userOperator.getParams().getAsJsonArray();
+            JsonObject userFnParamObject = userOperator.getParams().getAsJsonObject();
+            JsonArray userFnParamArray = userFnParamObject.get("Parameters").getAsJsonArray();
+
+            if (userFnParamArray.size() != args.size()) {
+                System.out.println("Error 417: Incorrect number of args for function application.");
+                System.exit(1);
+            }
+            // Make new bindings for the evaluated args
+            HashMap<String, Value> newBindings = new HashMap<>();
+            for (int i = 0; i < args.size(); i++) {
+                String key = userFnParamArray.get(i).getAsJsonObject().get("Identifier").getAsString();
+                System.out.println("Key in new bindings: " + key);
+                newBindings.put(key, args.get(i));
+            }
+            // Extend environment with new bindings
+            Environment functionEnv = extendEnvironment(newBindings, env);
+            // Eval the function block with this extended environment
+            return eval(userOperator.getBody(), functionEnv);
+        }
+    }
     /**
      * Helper method for extending environments to simmulate scope
      * @param newBindings
      * @param initEnv
      * @return
      */
-    private Environment extendEnvironment(HashMap<String, Value> newBindings, Environment initEnv) {
+    private static Environment extendEnvironment(HashMap<String, Value> newBindings, Environment initEnv) {
         if (newBindings.isEmpty()) {
             return initEnv;
         }
@@ -142,18 +345,77 @@ public class Interpreter
      * Mapped to string identifiers in the environment.
      */
     public static class Value {
-        Object data;
+        Object data; // Holds regular data (returned for eval when the identifier of a function is given)
+        Function<List<Object>, Object> function; // Holds function for application (if applicable)
 
+        // default constructor (sets function to null/assumes there is no apply)
         public Value() {
             this.data = 0;
+            this.function = null;
+        }
+
+        public Value(Object inputData) {
+            this.data = inputData;
+            this.function = null;
+        }
+
+        public Value(Function<List<Object>, Object> inputFunction) {
+            // User generated functions have data of random doubles to distinguish them from
+            // Built in functions or integer literals
+            this.data = Math.random();
+            this.function = inputFunction;
+        }
+
+        public Value(Object inputData, Function<List<Object>, Object> inputFunction) {
+            this.data = inputData;
+            this.function = inputFunction;
         }
 
         private void setData(Object newData) {
             this.data = newData;
         }
 
-        public Object getData() {
+        private Object getData() {
             return this.data;
         }
+
+        public boolean isFunction() {
+            return this.function != null;
+        }
+
+        public Object invoke(List<Object> args) {
+            if (this.function == null) {
+                throw new IllegalStateException("This value does not represent a built-in function.");
+            }
+            return this.function.apply(args);
+        }
     }
+
+    public static class UserDefinedFunction extends Value {
+        JsonElement fnParams;
+        JsonElement fnBody;
+        Environment fnEnv;
+
+        public UserDefinedFunction() {
+            this.function = (x -> x); // AAAAAAAAAA >>???
+            this.fnParams = null;
+            this.fnBody = null;
+            this.fnEnv = null;
+        }
+
+        public UserDefinedFunction(JsonElement params, JsonElement body, Environment env) {
+            this.function = (x -> x); // LOL 
+            this.fnParams = params;
+            this.fnBody = body;
+            this.fnEnv = env;
+        }
+
+        private JsonElement getParams() {
+            return this.fnParams;
+        }
+
+        private JsonElement getBody() {
+            return this.fnBody;
+        }
+    } 
 }

@@ -17,3 +17,5 @@ buildNumber.properties
 .classpath
 
 .vscode
+build.log
+demo/local/bin/
