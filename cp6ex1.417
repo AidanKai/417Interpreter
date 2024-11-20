@@ -1,0 +1,5 @@
+{
+  let incr = λ(n) { add(n, x) };
+  x = 3;
+  incr(1)
+}

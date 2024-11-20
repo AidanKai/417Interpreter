@@ -20,7 +20,7 @@ import com.google.gson.JsonPrimitive;
  */
 public class Interpreter
 {
-    static boolean lexicalScope = true;
+    static boolean lexicalScope = false;
     /**
      * Main class, loops through a switch statement and exits with non zero exit status on errors.
      * @param args
@@ -82,7 +82,6 @@ public class Interpreter
         });
 
         Value zeroValue = new Value("built-in zero? procedure", argsList -> {
-            //long a = 0;
             return ((long)argsList.get(0) == 0);
         });
 
@@ -123,6 +122,11 @@ public class Interpreter
      */
     private static Value eval(JsonElement exp, Environment env) {
 
+        // Tracing print
+        //System.out.println("Evaluating " + exp.toString() + ": ");
+
+        // Value result = new Value();
+
         // handle integer values and strings
         if (exp.isJsonPrimitive()) {
             JsonPrimitive prim = exp.getAsJsonPrimitive();
@@ -132,10 +136,12 @@ public class Interpreter
                     System.out.println("417: Improper number (not a 64-bit integer)");
                     System.exit(1);
                 }
+                //return new Value(prim.getAsLong());
                 return new Value(prim.getAsLong());
             }
             // Case for string literal
             else if (prim.isString()) {
+                //return new Value(prim.getAsString());
                 return new Value(prim.getAsString());
             }
             else {
@@ -155,18 +161,17 @@ public class Interpreter
                     JsonArray specialFormArray = value.getAsJsonArray();
                     switch (key) {
                         case "Application":
-                            JsonElement fn = specialFormArray.remove(0);
-                            List<Value> args = new ArrayList<>();
-                            for (JsonElement arg : specialFormArray) {
-                                args.add(eval(arg, env));
-                            }
-                            return applyFunction(fn, args, env);
+                            return applyFunction(specialFormArray, env);
                         case "Lambda":
                             return makeFunction(specialFormArray.get(0), specialFormArray.get(1), env);
                         case "Block":
                             return executeBlock(specialFormArray, env);
                         case "Cond":
                             return applyConditional(specialFormArray, env);
+                        case "Let":
+                            return applyLet(specialFormArray, env);
+                        case "Assignment":
+                            return performAssignment(specialFormArray, env);
                         default:
                             System.out.println("417: unknown expression type");
                             System.exit(1);
@@ -189,8 +194,56 @@ public class Interpreter
             System.out.println("417: unknown expression type");
             System.exit(1);
         }
-
         return null; // never reached
+    }
+
+    /**
+     * 
+     * @param letExp
+     * @param env
+     * @return
+     */
+    private static Value applyLet(JsonElement letExp, Environment env) {
+        JsonArray letArray = letExp.getAsJsonArray();
+
+        JsonElement var = letArray.get(0);
+        JsonElement rhs = letArray.get(1);
+        JsonElement body = letArray.get(2);
+
+        Value val = eval(rhs, env);
+
+        HashMap<String, Value> newBinding = new HashMap<>();
+        String key = var.getAsJsonObject().get("Identifier").getAsString();
+        newBinding.put(key, val);
+
+        return eval(body, extendEnvironment(newBinding, env));
+    }
+
+    /**
+     * 
+     * @param letExp
+     * @param env
+     * @return
+     */
+    private static Value performAssignment(JsonElement letExp, Environment env) {
+
+        JsonArray letArray = letExp.getAsJsonArray();
+
+        JsonElement id = letArray.get(0);
+        JsonElement rhs = letArray.get(1);
+
+        Value val = eval(rhs, env);
+
+        JsonObject identifierObj = id.getAsJsonObject();
+        String key = identifierObj.get("Identifier").getAsString();
+        if (env.bindings.get(key) == null) {
+            System.out.println("Error 417: No existing binding.");
+            System.exit(1);
+        }
+
+        env.getBindings().put(key, val);
+        
+        return val;
     }
 
     /**
@@ -253,13 +306,14 @@ public class Interpreter
      * @return index of searched key
      */
     private static Value lookup(String id, Environment env) {
-        /* System.out.println("\nKey being looked up: " + id);
-        System.out.println("Size of env: " + env.bindings.size());
-        System.out.println("Keys in bindings:");
-         */
-        /* for (String key : env.bindings.keySet()) {
-            System.out.print(key + ", ");
-        } */
+        System.out.println("Key being looked up: " + id);
+        System.out.print(" Size of env: " + env.bindings.size());
+        System.out.print(" Keys in bindings:");
+        
+        for (String key : env.bindings.keySet()) {
+            System.out.print(key + ": " + env.bindings.get(key).getData() + ", ");
+        }
+
         Value result = env.bindings.get(id);
         if (result == null) {
             System.out.println("Error 417: Identifier not found.");
@@ -283,7 +337,15 @@ public class Interpreter
      * @param env
      * @return
      */
-    private static Value applyFunction(JsonElement fn, List<Value> args, Environment env) {
+    private static Value applyFunction(JsonElement specialFormArray, Environment env) {
+        
+        JsonArray fnArray = specialFormArray.getAsJsonArray();
+        JsonElement fn = specialFormArray.getAsJsonArray().remove(0);
+
+        List<Value> args = new ArrayList<>();
+        for (JsonElement arg : fnArray) {
+            args.add(eval(arg, env));
+        }
 
         Value operator = eval(fn, env);
 
@@ -295,11 +357,18 @@ public class Interpreter
 
         // Check if operator is a built in function
         if (operator.getData() instanceof String) {
+            System.out.println("Built-in application bindings: ");
+            for (Map.Entry<String, Value> entry : env.getBindings().entrySet()) {
+                String key = entry.getKey();
+                Value val = entry.getValue();
+    
+                System.out.print(key + ": " + val.getData() + ", ");
+            } 
             // Evaluate args for function
             List<Object> operands = new ArrayList<>();
-            System.out.println("\nExpressions in args");
+            // System.out.println("\nExpressions in args");
             for (Value exp : args) {
-                System.out.print(exp.getData() + ", \n");
+                // System.out.print(exp.getData() + ", \n");
                 operands.add(exp.getData());
             }
 
@@ -326,11 +395,20 @@ public class Interpreter
             HashMap<String, Value> newBindings = new HashMap<>();
             for (int i = 0; i < args.size(); i++) {
                 String key = userFnParamArray.get(i).getAsJsonObject().get("Identifier").getAsString();
-                System.out.println("Key in new bindings: " + key);
+                System.out.println("Key in new bindings: " + key + ", Value: " + args.get(i).getData() + ", isFunction: " + args.get(i).isFunction());
                 newBindings.put(key, args.get(i));
             }
             // Extend environment with new bindings
             Environment newFunctionEnv = extendEnvironment(newBindings, functionEnv);
+
+            /* System.out.println("NewFunctionEnv Bindings: ");
+            for (Map.Entry<String, Value> entry : newFunctionEnv.getBindings().entrySet()) {
+            String key = entry.getKey();
+            Value val = entry.getValue();
+
+            System.out.print(key + ": " + val.getData() + ", ");
+            } */
+
             // Eval the function block with this extended environment
             return eval(userOperator.getBody(), newFunctionEnv);
         }
@@ -346,15 +424,29 @@ public class Interpreter
             return initEnv;
         }
 
-        HashMap<String, Value> resultBindings = initEnv.bindings;
+        HashMap<String, Value> resultBindings = new HashMap<>();
+        resultBindings.putAll(initEnv.getBindings());
 
-        for (String id : newBindings.keySet()) {
-            resultBindings.put(id, newBindings.get(id));
+        System.out.println("New Bindings: ");
+        for (Map.Entry<String, Value> entry : newBindings.entrySet()) {
+            String key = entry.getKey();
+            Value val = entry.getValue();
+
+            //System.out.print(key + ": " + val.getData() + ", ");
+            resultBindings.put(key, val);
         }
 
         Environment resultEnvironment = new Environment(resultBindings);
         initEnv.next = resultEnvironment;
         resultEnvironment.next = null;
+
+        /* System.out.println("Result Bindings: ");
+        for (Map.Entry<String, Value> entry : resultEnvironment.getBindings().entrySet()) {
+            String key = entry.getKey();
+            Value val = entry.getValue();
+
+            System.out.print(key + ": " + val.getData() + ", ");
+        } */
 
         return resultEnvironment;
     }
@@ -372,6 +464,10 @@ public class Interpreter
         public Environment(HashMap<String, Value> initBindings) {
             this.bindings = initBindings;
             this.next = null;
+        }
+
+        public HashMap<String, Value> getBindings() {
+            return this.bindings;
         }
     }
 
@@ -395,19 +491,13 @@ public class Interpreter
         }
 
         public Value(Function<List<Object>, Object> inputFunction) {
-            // User generated functions have data of random doubles to distinguish them from
-            // Built in functions or integer literals
-            this.data = Math.random();
+            this.data = 0;
             this.function = inputFunction;
         }
 
         public Value(Object inputData, Function<List<Object>, Object> inputFunction) {
             this.data = inputData;
             this.function = inputFunction;
-        }
-
-        private void setData(Object newData) {
-            this.data = newData;
         }
 
         private Object getData() {
@@ -419,7 +509,7 @@ public class Interpreter
         }
 
         public Object invoke(List<Object> args) {
-            if (this.function == null) {
+            if (!isFunction()) {
                 throw new IllegalStateException("This value does not represent a built-in function.");
             }
             return this.function.apply(args);
