@@ -20,7 +20,7 @@ import com.google.gson.JsonPrimitive;
  */
 public class Interpreter
 {
-    boolean lexicalScope;
+    //boolean lexicalScope;
     /**
      * Main class, loops through a switch statement and exits with non zero exit status on errors.
      * @param args
@@ -57,6 +57,10 @@ public class Interpreter
         });
 
         Value mulValue = new Value("built-in multiply procedure *", argsList -> {
+            System.out.println("\nItems being multiplied: ");
+            for (Object o : argsList) {
+                System.out.print(o + ", ");
+            }
             if (argsList.isEmpty() || argsList.stream().anyMatch(arg -> !(arg instanceof Long))) {
                 throw new IllegalArgumentException("Function requires all arguments to be integers.");
             }
@@ -77,7 +81,10 @@ public class Interpreter
             return Objects.equals(a, b);
         });
 
-        //Value zero = new Value("built-in zero? procedure", )
+        Value zeroValue = new Value("built-in zero? procedure", argsList -> {
+            //long a = 0;
+            return ((long)argsList.get(0) == 0);
+        });
 
         initialBindings.put("add", addValue);
         initialBindings.put("sub", subValue);
@@ -85,13 +92,13 @@ public class Interpreter
         initialBindings.put("eq", eqValue);
         initialBindings.put("true", new Value(true));
         initialBindings.put("false", new Value(false));
+        initialBindings.put("zero?", zeroValue);
         Long x = (long) 10;
         Long v = (long) 5;
         Long i = (long) 1;
         initialBindings.put("x", new Value(x));
         initialBindings.put("v", new Value(v));
         initialBindings.put("i", new Value(i));
-
         
         Environment initialEnv = new Environment(initialBindings);
         
@@ -116,8 +123,6 @@ public class Interpreter
      */
     private static Value eval(JsonElement exp, Environment env) {
 
-        Value result = new Value();
-
         // handle integer values and strings
         if (exp.isJsonPrimitive()) {
             JsonPrimitive prim = exp.getAsJsonPrimitive();
@@ -127,11 +132,15 @@ public class Interpreter
                     System.out.println("417: Improper number (not a 64-bit integer)");
                     System.exit(1);
                 }
-                result.setData(prim.getAsLong());
+                return new Value(prim.getAsLong());
             }
             // Case for string literal
             else if (prim.isString()) {
-                result.setData(prim.getAsString());
+                return new Value(prim.getAsString());
+            }
+            else {
+                System.out.println("Error 417: Improper Json literal");
+                System.exit(1);
             }
         }
         // SPECIAL FORM (keyword) or functionality
@@ -157,10 +166,10 @@ public class Interpreter
                         case "Block":
                             return executeBlock(specialFormArray, env);
                         case "Cond":
-                            //return applyConditional()
-                            break;
+                            return applyConditional(specialFormArray, env);
                         default:
-                            break;
+                            System.out.println("417: unknown expression type");
+                            System.exit(1);
                     }
                 }
                 else {
@@ -169,7 +178,8 @@ public class Interpreter
                             //System.out.println("Value returned from lookup " + key + ": " + lookup(value.getAsString(), env).getData());
                             return lookup(value.getAsString(), env);
                         default:
-                            break;
+                            System.out.println("417: unknown expression type");
+                            System.exit(1);
                     }
                 }
             }
@@ -179,8 +189,8 @@ public class Interpreter
             System.out.println("417: unknown expression type");
             System.exit(1);
         }
-        
-        return result;
+
+        return null; // never reached
     }
 
     /**
@@ -196,8 +206,25 @@ public class Interpreter
             return new Value(false);
         }
 
+        JsonElement clause = clauseArray.remove(0);
+        JsonObject clauseObj = clause.getAsJsonObject();
+        JsonArray clauseArgs = clauseObj.get("Clause").getAsJsonArray();
+        
+        JsonElement test = clauseArgs.get(0);
+        JsonElement consequence = clauseArgs.get(1);
 
-        return new Value();
+        Value testVal = eval(test, env);
+        if (!(testVal.getData() instanceof Boolean)) {
+            System.out.println("Error 417: Not a boolean value.");
+            System.exit(1);
+        }
+
+        if ((boolean) testVal.getData()) {
+            return eval(consequence, env);
+        }
+        else {
+            return applyConditional(clauses, env);
+        }
     }
 
     /**
@@ -270,8 +297,9 @@ public class Interpreter
         if (operator.getData() instanceof String) {
             // Evaluate args for function
             List<Object> operands = new ArrayList<>();
-
+            System.out.println("\nExpressions in args");
             for (Value exp : args) {
+                System.out.print(exp.getData() + ", \n");
                 operands.add(exp.getData());
             }
 
