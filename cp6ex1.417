@@ -1,5 +1,5 @@
 {
-  let incr = λ(n) { add(n, x) };
-  x = 3;
-  incr(1)
+  let y = 0;
+  let z = y = x = 333;
+  add(add(x,y),z);
 }
