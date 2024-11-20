@@ -7,4 +7,4 @@
    cond  
     (zero?(n) => 1) 
     (true => mul(n, f(f, sub(n, 1))))
-}, 10)
+}, 5)

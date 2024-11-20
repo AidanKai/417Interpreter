@@ -20,7 +20,7 @@ import com.google.gson.JsonPrimitive;
  */
 public class Interpreter
 {
-    //boolean lexicalScope;
+    static boolean lexicalScope = true;
     /**
      * Main class, loops through a switch statement and exits with non zero exit status on errors.
      * @param args
@@ -311,6 +311,13 @@ public class Interpreter
             JsonObject userFnParamObject = userOperator.getParams().getAsJsonObject();
             JsonArray userFnParamArray = userFnParamObject.get("Parameters").getAsJsonArray();
 
+            // check scoping
+            
+            Environment functionEnv = userOperator.getEnvironment();
+            if (!lexicalScope) {
+                functionEnv = env;
+            }
+
             if (userFnParamArray.size() != args.size()) {
                 System.out.println("Error 417: Incorrect number of args for function application.");
                 System.exit(1);
@@ -323,9 +330,9 @@ public class Interpreter
                 newBindings.put(key, args.get(i));
             }
             // Extend environment with new bindings
-            Environment functionEnv = extendEnvironment(newBindings, env);
+            Environment newFunctionEnv = extendEnvironment(newBindings, functionEnv);
             // Eval the function block with this extended environment
-            return eval(userOperator.getBody(), functionEnv);
+            return eval(userOperator.getBody(), newFunctionEnv);
         }
     }
     /**
@@ -444,6 +451,10 @@ public class Interpreter
 
         private JsonElement getBody() {
             return this.fnBody;
+        }
+
+        private Environment getEnvironment() {
+            return this.fnEnv;
         }
     } 
 }
